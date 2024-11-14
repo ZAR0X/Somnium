@@ -30,7 +30,7 @@ async function handleRequest(request) {
   } 
   else if (url.pathname == "/styles/") {
     let response = JSON.stringify(await styles());
-    return new Response("response", {headers: HEAD_JSON});
+    return new Response(response, {headers: HEAD_JSON});
   } else {
     let response = JSON.stringify(ERROR_404);
     return new Response(response, {headers: HEAD_JSON});
