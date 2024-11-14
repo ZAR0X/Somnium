@@ -164,7 +164,7 @@ async function generate(prompt, style) {
   }
 }
 
-async function Styles() {
+async function styles() {
   let r = await fetch("https://paint.api.wombo.ai/api/styles")
   r = await r.json()
   let styles = await CustomStyles()
