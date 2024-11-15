@@ -3,9 +3,13 @@
 // ---------------------------- //
 
 
-const ERROR_404 = {"action":"error", "status": 404, "usage": "GET /generate/?prompt=<text>&style=<style>"};
-const HEAD_JSON = { 'content-type': 'application/json', 'Access-Control-Allow-Origin': "*"};
-const HEAD_HTML = { 'content-type': 'text/html', 'Access-Control-Allow-Origin': "*"};
+const ERROR_404 = { 'action':'error', 'status': 404, 'text': 'GET /generate/?prompt=<text>&style=<style>'};
+const ERROR_403 = { 'action':'error', 'status': 403, 'text': 'Process failed or contains NSFW.'}
+const ERROR_402 = { 'action':'error', 'status': 402, 'text': 'Current style id does not exist.'};
+
+const HEAD_JSON = { 'content-type': 'application/json', 'Access-Control-Allow-Origin': '*'};
+const HEAD_HTML = { 'content-type': 'text/html', 'Access-Control-Allow-Origin': '*'};
+const HEAD_IMAG = {'Content-Type': 'image/png','Cache-Control': 'max-age=3600'};
 
 
 // ---------- Event Listener ---------- //
@@ -20,24 +24,25 @@ async function handleRequest(request) {
   let style = url.searchParams.get('style');
 
   if (url.pathname == "/") {
-    let response = "<div>aghhh Coming soon...</div>";
+    let response = "<div>Coming soon...</div>";
     return new Response(response, {headers: HEAD_HTML});
   }
 
-  if (prompt && style && url.pathname == "/generate") {
-    let response = JSON.stringify(await generate(prompt, style));
-    return new Response(response, {headers: HEAD_JSON});
+  if (prompt && style && url.pathname == "/generate/") {
+    let response = await generate(prompt, style);
+    return new Response(JSON.stringify(response), {headers: HEAD_JSON});
   } 
   else if (url.pathname == "/styles/") {
-    let response = JSON.stringify(await styles());
-    return new Response(response, {headers: HEAD_JSON});
+    let response = await Styles();
+    return new Response(JSON.stringify(response), {headers: HEAD_JSON});
   } else {
-    let response = JSON.stringify(ERROR_404);
-    return new Response(response, {headers: HEAD_JSON});
+    let response = ERROR_404;
+    return new Response(JSON.stringify(response), {headers: HEAD_JSON});
   }
 }
 
-// ---------- Somnium Function ---------- //
+
+// ---------- Get Somnium Header ---------- //
 
 async function GetHeader() {
   let r1 = await fetch('https://dream.ai/create');
@@ -65,7 +70,6 @@ async function GetHeader() {
   
   let params = { key: googlekey };
   let data = { returnSecureToken: true };
-  
   
   let url = new URL("https://identitytoolkit.googleapis.com/v1/accounts:signUp");
   url.search = new URLSearchParams(params).toString();
@@ -97,25 +101,27 @@ async function GetHeader() {
   }
 }
 
-async function CustomStyles() {
-  let styles = await fetch('https://raw.githubusercontent.com/Vauth/custom/main/styles.json')
-  return await styles.json()
-}
+
+// ---------- Generate  ---------- //
 
 async function generate(prompt, style) {
-  let headers = await GetHeader()
-    
-  let styles = await CustomStyles()
-  let CustomIds = Object.fromEntries(Object.entries(styles).map(([key, value]) => [parseInt(value['id']), key]))
+  if (!(await Styles()).styles.hasOwnProperty(style)) {return ERROR_402}
+
+  let headers = await GetHeader();
+  let styles = await CustomStyles();
+
+  let CustomIds = Object.fromEntries(Object.entries(styles).map(([key, value]) => [parseInt(value['id']), key]));
+
   let textQ;
   let styleQ;
+
   if (Object.keys(CustomIds).includes(style.toString())) {
-      textQ = styles[CustomIds[style]]['prompt'].replace('{PROMPT}', prompt)
-      styleQ = parseInt(styles[CustomIds[style]]['style'])
+      textQ = styles[CustomIds[style]]['prompt'].replace('{PROMPT}', prompt);
+      styleQ = parseInt(styles[CustomIds[style]]['style']);
   }
   else {
-      textQ = prompt
-      styleQ = style
+      textQ = prompt;
+      styleQ = style;
   }
   
   let data = {
@@ -132,6 +138,7 @@ async function generate(prompt, style) {
       headers: headers,
       body: JSON.stringify(data),
   });
+
   genResponse = await genResponse.json()
   try {
       let image_id = genResponse['id']
@@ -141,9 +148,7 @@ async function generate(prompt, style) {
               headers: headers,
           });
           response = await response.json()
-          if (response['state'] == 'failed') {
-              return {"action":"failed", "status": 412, "response": 'NSFW'}
-          }
+          if (response['state'] == 'failed') {return ERROR_403};
           await new Promise(r => setTimeout(r, 3000));
           try {
               let img = await response['result']
@@ -151,7 +156,7 @@ async function generate(prompt, style) {
                   return {"action":"success", "status": 200, "image": img['final']}
               }
               else {
-                  continue
+                continue
               }
           }
           catch {
@@ -159,20 +164,32 @@ async function generate(prompt, style) {
           }
       }
   }
-  catch (err){
-      return err
+  catch (error){
+      return error
   }
 }
 
-async function styles() {
-  let r = await fetch("https://paint.api.wombo.ai/api/styles")
-  r = await r.json()
-  let styles = await CustomStyles()
-  let alls = Object.fromEntries(Object.entries(styles).map(([key, value]) => [key, value['id']]))
-  r.forEach((style) => {
-      if (!styles.is_premium) {
-          alls[style.name] = style.id
-      }
-  })
+// ---------- Custom Styles ---------- //
+
+async function CustomStyles() {
+  let styles = await fetch('https://raw.githubusercontent.com/Vauth/custom/main/styles.json')
+  return await styles.json()
+
+}
+
+// ---------- Default Styles ---------- //
+
+async function DefaultStyles() {
+  let styles = await fetch("https://paint.api.wombo.ai/api/styles")
+  return await styles.json()
+}
+
+// ---------- List Styles ---------- //
+
+async function Styles() {
+  let Dstyles = await DefaultStyles()
+  let Cstyles = await CustomStyles()
+  let alls = Object.fromEntries(Object.entries(Cstyles).map(([key, value]) => [value['id'], {"name": key, "image": value['image']}]))
+  Dstyles.forEach((style) => {if (!style.is_premium) {alls[style.id] = {"name": style['name'], "image": style['photo_url']}}})
   return {"action":"success", "status": 200, "styles": alls}
 }
